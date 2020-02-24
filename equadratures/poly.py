@@ -523,6 +523,45 @@ class Poly(object):
             **w**: A numpy.ndarray of the corresponding quadrature weights with shape (number_of_samples, 1).
         """
         return self._quadrature_points, self._quadrature_weights
+    def get_polyfit_variance(self, stack_of_points, length=0.1, variance_f=0.2, variance_noise=1e-5):
+        """
+        Evaluates the variance of the polynomial approximation assuming a Gaussian distribution in the data.
+
+        :param Poly self:
+            An instance of the Poly class.
+        :param numpy.ndarray stack_of_points:
+            An ndarray with shape (number_of_observations, dimensions) at which the polynomial fit must be evaluated at.
+        """
+
+        train_input = self._quadrature_points
+        test_input = stack_of_points
+        baseline_mean_train  = self.get_polyfit(train_input)
+        baseline_mean_test  = self.get_polyfit(test_input)
+
+        train_output = self._model_evaluations - baseline_mean_train
+        test_output = self.get_polyfit(test_input)
+
+        def squared_exponential_covariance(train_data, test_data, length_parameter, variance_parameter):
+            """
+            Standard squared exponential covariance kernel.
+            """
+            M = len(train_data)
+            N = len(test_data)
+            K = np.zeros((M, N))
+            for i in range(0, M):
+                for j in range(0, N):
+                    K[i, j] = variance_parameter * np.exp(-1.0 *  np.linalg.norm(train_data[i,:] - test_data[j,:], 2)**2 / length_parameter )
+            return K
+
+        C = squared_exponential_covariance(train_input, train_input, length, variance_f)
+        R = squared_exponential_covariance(train_input, test_input, length, variance_f)
+        C_star = squared_exponential_covariance(test_input, test_input, length, variance_f)
+        S = inv( C + np.eye(len(train_input)) * variance_noise )
+        mu = np.dot( R.T, np.dot(S, train_output) )
+        covar = C_star - np.dot(R.T, np.dot(S, R) )
+        return mu, baseline_mean_test, covar
+
+
     def get_polyfit(self, stack_of_points):
         """
         Evaluates the the polynomial approximation of a function (or model data) at prescribed points.
@@ -863,3 +902,10 @@ def cell2matrix(G, W):
             counter = counter + 1
     BigC = np.mat(BigC)
     return BigC
+def inv(M):
+    ll, mm = M.shape
+    M2 = deepcopy(M) + 1e-12 * np.eye(ll)
+    L = np.linalg.cholesky(M2)
+    inv_L = np.linalg.inv(L)
+    inv_M = inv_L.T @ inv_L
+    return inv_M
